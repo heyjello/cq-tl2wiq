@@ -18,7 +18,7 @@ h2{font-size:18px;margin:4px 0 10px}
 .pill{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:3px 10px;white-space:nowrap}
 .bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:6px 0 2px}
 .bar>i{display:block;height:100%;background:var(--acc2);width:0;transition:width .3s}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:12px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:12px 0;max-width:100%;min-width:0}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
 button,select{font:inherit;color:inherit}
 .btn{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;cursor:pointer;text-align:left}
@@ -27,14 +27,23 @@ button,select{font:inherit;color:inherit}
 .btn.small{padding:6px 10px;font-size:14px}
 .btn:focus-visible,.opt:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .mode b{display:block}.mode span{color:var(--mute);font-size:14px}
-.opt{display:flex;gap:10px;width:100%;margin:8px 0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);cursor:pointer;text-align:left}
+.opt{display:flex;gap:10px;width:100%;min-width:0;margin:8px 0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);cursor:pointer;text-align:left}
 .opt .k{flex:none;width:24px;height:24px;border-radius:6px;background:var(--code);display:grid;place-items:center;font-size:13px;font-weight:600}
-.opt pre{margin:0;white-space:pre-wrap}
+.opt pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}
 .opt.dim{opacity:.45}
 .opt.right{border-color:var(--acc2);background:var(--good)}
 .opt[disabled]{cursor:default}
+.dunno{display:block;width:100%;margin-top:6px;text-align:center;border-style:dashed;color:var(--mute)}
+.dunno:hover{color:var(--ink)}
+.dunno:disabled{opacity:.55;cursor:default}
+.dunno kbd{margin-left:4px}
+.review-actions{align-items:stretch}
+.review-actions .btn{flex:1 1 160px}
+.review-list{margin:12px 0 0;padding-left:1.2em}
+.review-list li{margin:8px 0;overflow-wrap:anywhere}
+.review-md{width:100%;min-height:160px;max-height:280px;margin-top:8px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;border:1px solid var(--line);border-radius:8px;background:var(--code);color:var(--ink);padding:8px;white-space:pre;overflow:auto}
 pre,code{font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-pre.code{background:var(--code);border-radius:8px;padding:10px;overflow:auto;white-space:pre}
+pre.code{background:var(--code);border-radius:8px;padding:10px;overflow:auto;white-space:pre;max-width:100%}
 .meta{color:var(--mute);font-size:13px}
 .fb{border-radius:10px;padding:10px 12px;margin-top:10px;background:var(--soft)}
 .fb.good{background:var(--good)}
@@ -126,6 +135,17 @@ function normalize(s){
   const o=Object.assign(fresh(), (s && typeof s==='object') ? s : {});
   if(typeof o.xp!=='number' || !isFinite(o.xp)) o.xp=0;
   ['q','tags','boss','bossDay','badges'].forEach(k=>{ if(!o[k] || typeof o[k]!=='object' || Array.isArray(o[k])) o[k]={}; });
+  Object.keys(o.q).forEach(id=>{
+    const r=o.q[id];
+    if(!r || typeof r!=='object' || Array.isArray(r)) return;
+    if(typeof r.seen!=='number' || !isFinite(r.seen)) r.seen=0;
+    if(typeof r.first!=='number' || !isFinite(r.first)) r.first=0;
+    if(typeof r.ever!=='boolean') r.ever=!!r.ever;
+    if(typeof r.missed!=='boolean') r.missed=!!r.missed;
+    if(typeof r.unknown!=='boolean') r.unknown=false;
+    if(typeof r.wrong!=='boolean') r.wrong=!!(r.missed && !r.unknown);
+    if(r.missed && !r.reason) r.reason=r.unknown&&r.wrong?'incorrect+unknown':r.unknown?'unknown':'incorrect';
+  });
   if(!Array.isArray(o.pounceDates)) o.pounceDates=[];
   if(o.session && (!Array.isArray(o.session.ids) || typeof o.session.i!=='number')) o.session=null;
   return o;
@@ -245,7 +265,93 @@ function pounceSet(){
   for(const t of tags){ if(out.length>=5) break; const p=pick(DATA.questions.filter(q=>q.tag===t && !out.includes(q)),1); if(p[0]) out.push(p[0]); }
   return shuffle(out);
 }
-function reviewPile(){ return DATA.questions.filter(q=>S.q[q.id] && S.q[q.id].missed); }
+function reviewPile(){ return DATA.questions.filter(q=>{ const r=S.q[q.id]; return !!(r && typeof r==='object' && r.missed); }); }
+function reviewReasonLabel(r){
+  r=r||{};
+  const unknown=r.reason==='unknown'||r.reason==='incorrect+unknown'||r.unknown;
+  const incorrect=r.reason==='incorrect'||r.reason==='incorrect+unknown'||r.wrong;
+  if(unknown && incorrect) return "I don't know · also answered incorrectly";
+  if(unknown) return "I don't know";
+  if(incorrect || r.missed) return 'Incorrect';
+  return 'Review';
+}
+function mdFence(text, lang){
+  return '```'+(lang||'')+'\n'+String(text).replace(/\n+$/,'')+'\n```';
+}
+function exportReviewMarkdown(dateStr){
+  const pile=reviewPile();
+  const when=dateStr||today();
+  const lines=['# Cat Quest review pile','', 'Exported '+when+' · '+pile.length+' question'+(pile.length===1?'':'s')+' to teach.','', 'Each item was marked I don\'t know or answered incorrectly. It stays in this pile until a first-try correct answer.',''];
+  if(!pile.length){ lines.push('No missed or unknown questions right now.',''); return lines.join('\n'); }
+  pile.forEach((q,idx)=>{
+    const r=S.q[q.id]||{};
+    lines.push('## '+(idx+1)+'. '+q.q,'');
+    lines.push('- **Id:** '+q.id);
+    lines.push('- **Tag:** '+(DATA.tags[q.tag]||q.tag));
+    lines.push('- **Reason:** '+reviewReasonLabel(r));
+    if(q.lang) lines.push('- **Language:** '+(q.lang==='ts'?'TypeScript':q.lang==='py'?'Python':q.lang==='sql'?'SQL':q.lang));
+    lines.push('');
+    if(q.tables && q.tables.length){
+      lines.push('**Tables:** '+q.tables.join(', '),'');
+      q.tables.forEach(t=>{ if(DATA.tables[t]){ lines.push(mdFence(DATA.tables[t]),''); } });
+    }
+    if(q.setup){ lines.push('**Setup**','', mdFence(q.setup.trim(), q.lang),''); }
+    if(q.code){ lines.push('**Code**','', mdFence(q.code, q.lang),''); }
+    lines.push('**Choices**','');
+    q.options.forEach((o,i)=>{
+      const raw=String(o).replace(/\r\n/g,'\n').trim();
+      const mark=i===q.answer?' **(correct)**':'';
+      if(raw.indexOf('\n')===-1) lines.push('- **'+L[i]+'.** '+raw+mark);
+      else lines.push('- **'+L[i]+'.**'+mark,'', mdFence(raw, q.lang));
+    });
+    lines.push('');
+    lines.push('**Correct answer:** '+L[q.answer]+'. '+String(q.options[q.answer]).replace(/\s+/g,' ').trim());
+    lines.push('');
+    lines.push('**Explanation:** '+q.explain);
+    if(q.source){ lines.push(''); lines.push('**Source:** '+q.source); }
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+function revealPreview(md){
+  const box=$('reviewMd');
+  if(!box) return null;
+  box.value=md;
+  const det=box.closest('details');
+  if(det) det.open=true;
+  return box;
+}
+function fallbackCopy(text){
+  const area=document.createElement('textarea');
+  area.value=text; area.setAttribute('readonly','');
+  area.style.position='fixed'; area.style.left='0'; area.style.top='0'; area.style.opacity='0';
+  document.body.appendChild(area); area.focus(); area.select();
+  let ok=false; try{ ok=document.execCommand('copy'); }catch(e){ ok=false; }
+  area.remove(); return ok;
+}
+function copyReviewMarkdown(){
+  const md=exportReviewMarkdown(today());
+  const box=revealPreview(md);
+  const done=()=>toast("Copied review Markdown. Paste it into the teaching session.");
+  const showBox=()=>{ if(box){ box.focus(); box.select(); toast('Clipboard blocked. The Markdown is selected in the preview.'); } else toast('Clipboard blocked. Use Download .md.'); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(md).then(done,()=>{ if(fallbackCopy(md)) done(); else showBox(); });
+  }
+  if(fallbackCopy(md)) done(); else showBox();
+  return md;
+}
+function downloadReviewMarkdown(){
+  const md=exportReviewMarkdown(today());
+  revealPreview(md);
+  let url=null, isBlob=false;
+  try{ if(window.Blob && window.URL && URL.createObjectURL){ url=URL.createObjectURL(new Blob([md],{type:'text/markdown'})); isBlob=true; } }catch(e){ url=null; }
+  if(!url) url='data:text/markdown;charset=utf-8,'+encodeURIComponent(md);
+  const a=document.createElement('a'); a.href=url; a.download='cat-quest-review.md'; a.style.display='none';
+  document.body.appendChild(a); a.click(); a.remove();
+  if(isBlob) setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} },5000);
+  toast('Downloaded cat-quest-review.md');
+  return md;
+}
 
 // ---------- views
 let session=null;
@@ -269,11 +375,11 @@ function home(){
       <button class="btn mode" data-go="pounce"><b>☀️ Daily Pounce</b><span>${done?'Done today. Go again for XP anytime.':'5 mixed questions. Keeps your flame lit.'}</span></button>
       <button class="btn mode" data-go="sprint"><b>🏃 Topic Sprint</b><span>Choose a tag, 10 questions.</span></button>
       <button class="btn mode" data-go="day"><b>📅 Day Pack</b><span>The questions for each prep day, Days 1 to 11 (Oct 31 to Nov 10).</span></button>
-      <button class="btn mode" data-go="review"><b>🧺 Review Pile</b><span>${rp?rp+' question'+(rp===1?'':'s')+' to revisit.':'Empty. Nice.'}</span></button>
+      <button class="btn mode" data-go="review"><b>🧺 Review Pile</b><span>${rp?rp+' question'+(rp===1?'':'s')+' to revisit or copy.':'Empty. Nice.'}</span></button>
       <button class="btn mode" data-go="boss"><b>⚔️ Boss Fights</b><span>Timed live-coding rounds, self-scored.</span></button>
       <button class="btn mode" data-go="stats"><b>📊 Stats & badges</b><span>Accuracy by tag, badges, reset.</span></button>
     </div>
-    <p class="meta">Keys: <kbd>1</kbd>–<kbd>4</kbd> or <kbd>A</kbd>–<kbd>D</kbd> to answer, <kbd>Enter</kbd> next, <kbd>Esc</kbd> home. Nothing ever takes XP away.</p>
+    <p class="meta">Keys: <kbd>1</kbd>–<kbd>4</kbd> or <kbd>A</kbd>–<kbd>D</kbd> to answer, <kbd>0</kbd> for I don't know, <kbd>Enter</kbd> next, <kbd>Esc</kbd> home. Nothing ever takes XP away.</p>
   </div>
   <div class="card"><h2>Badges</h2>${badgeHtml()}</div>`;
   bindGo();
@@ -287,7 +393,7 @@ function go(where,arg){
   if(where==='sprintTag') return startSession(pick(DATA.questions.filter(q=>q.tag===arg),10),'Topic Sprint · '+DATA.tags[arg],'sprint');
   if(where==='day') return chooser('Day Pack','Pick a prep day. Interview: '+DATA.interview.label+'.',Object.entries(DATA.days).map(([k,v])=>[k,v+' ('+dayPool(k).length+')']).concat([['final',DATA.finalLabel+' ('+dayPool('final').length+')']]),'dayN');
   if(where==='dayN') return startSession(arg==='final'?shuffle(dayPool(arg)):seededShuffle(dayPool(arg),'pack-'+arg),arg==='final'?DATA.finalLabel:DATA.days[arg],'day');
-  if(where==='review'){ const r=reviewPile(); if(!r.length){ toast('Review Pile is empty. 😸'); return home(); } return startSession(shuffle(r).slice(0,10),'Review Pile','review'); }
+  if(where==='review') return reviewView();
   if(where==='boss') return bossList();
   if(where==='bossN') return bossView(arg);
   if(where==='stats') return stats();
@@ -343,6 +449,30 @@ function resume(){
   session.done=false; persistSession(); showQ();
 }
 function codeBlock(s){ return `<pre class="code"><code>${esc(s)}</code></pre>`; }
+function reviewView(){
+  const pile=reviewPile();
+  if(!pile.length){ toast('Review Pile is empty. 😸'); return home(); }
+  const items=pile.map(q=>{ const r=S.q[q.id]||{}; return `<li><b>${esc(q.q)}</b><div class="meta">${esc(DATA.tags[q.tag]||q.tag)} · ${esc(reviewReasonLabel(r))}</div></li>`; }).join('');
+  $('view').innerHTML=`<div class="card"><h2>🧺 Review Pile</h2>
+    <p class="meta">${pile.length} question${pile.length===1?'':'s'}. They stay here until a first-try correct answer. Getting it right on a later try still leaves it here. Copy the Markdown into a teaching session.</p>
+    <div class="row review-actions">
+      <button class="btn primary" id="startReview" type="button">Start review (${Math.min(10,pile.length)})</button>
+      <button class="btn" id="copyReview" type="button">Copy Markdown</button>
+      <button class="btn" id="downloadReview" type="button">Download .md</button>
+      <button class="btn small" data-go="home" type="button">← Home</button>
+    </div>
+    <ol class="review-list">${items}</ol>
+    <details><summary>Markdown preview</summary>
+      <textarea id="reviewMd" class="review-md" readonly aria-label="Review pile as Markdown"></textarea>
+    </details>
+  </div>`;
+  $('reviewMd').value=exportReviewMarkdown(today());
+  bindGo();
+  $('startReview').onclick=()=>startSession(shuffle(pile).slice(0,10),'Review Pile','review');
+  $('copyReview').onclick=()=>copyReviewMarkdown();
+  $('downloadReview').onclick=()=>downloadReviewMarkdown();
+  $('startReview').focus();
+}
 function showQ(){
   const q=session.list[session.i]; session.q=q; session.tries=0; session.done=false; session.read=false;
   const tbl = q.tables ? `<details><summary>Shared tables: ${q.tables.join(', ')}</summary>${q.tables.map(t=>codeBlock(DATA.tables[t])).join('')}</details>` : '';
@@ -351,27 +481,46 @@ function showQ(){
     <div class="row" style="justify-content:space-between"><span class="meta">${esc(session.title)} · ${session.i+1} of ${session.list.length}</span><span class="meta">${esc(DATA.tags[q.tag])}${q.lang==='py'?' · Python':q.lang==='ts'?' · TypeScript':''}</span></div>
     <h2 id="qtext">${esc(q.q)}</h2>${tbl}${setup}${q.code?codeBlock(q.code):''}
     <div role="group" aria-labelledby="qtext">${q.options.map((o,i)=>`<button class="opt" data-i="${i}"><span class="k">${L[i]}</span>${o.includes('\n')?`<pre>${esc(o)}</pre>`:`<span>${esc(o)}</span>`}</button>`).join('')}</div>
-    <div id="fb"></div>
+    <button class="btn dunno" id="dunno" type="button">I don't know <kbd>0</kbd></button>
+    <p class="meta" id="dunnoHint">Shows the answer and explanation, awards 0 XP, and saves the question to the Review Pile.</p>
+    <div id="fb" aria-live="polite"></div>
     <div class="row" style="margin-top:10px"><button class="btn small" data-go="home">← Home</button></div>
   </div>`;
   bindGo();
   document.querySelectorAll('.opt').forEach(b=>b.onclick=()=>answer(+b.dataset.i));
+  $('dunno').onclick=()=>dunno();
   const first=document.querySelector('.opt'); if(first) first.focus();
 }
-function rec(q){ return S.q[q.id] || (S.q[q.id]={seen:0,first:0,ever:false,missed:false}); }
+function rec(q){
+  if(!S.q[q.id] || typeof S.q[q.id]!=='object' || Array.isArray(S.q[q.id])) S.q[q.id]={seen:0,first:0,ever:false,missed:false,unknown:false,wrong:false,reason:''};
+  const r=S.q[q.id];
+  if(typeof r.unknown!=='boolean') r.unknown=false;
+  if(typeof r.wrong!=='boolean') r.wrong=!!(r.missed && !r.unknown);
+  return r;
+}
+function markForReview(r, kind){
+  r.missed=true;
+  if(kind==='unknown') r.unknown=true;
+  if(kind==='incorrect') r.wrong=true;
+  if(r.unknown && r.wrong) r.reason='incorrect+unknown';
+  else if(r.unknown) r.reason='unknown';
+  else r.reason='incorrect';
+}
+function clearReview(r){ r.missed=false; r.unknown=false; r.wrong=false; r.reason=''; }
 function tagRec(t){ return S.tags[t] || (S.tags[t]={seen:0,first:0}); }
 function answer(i){
   if(session.done) return;
   const q=session.q, btn=document.querySelector(`.opt[data-i="${i}"]`);
   if(!btn || btn.disabled) return;
+  const dun=$('dunno'); if(dun) dun.disabled=true;
   session.tries++;
   const r=rec(q), tr=tagRec(q.tag);
   if(i===q.answer){
     session.done=true;
     let gain = session.tries===1 ? 10 : 5;
     let bonus=0;
-    if(session.tries===1){ S.run++; bonus=Math.min(2*(S.run-1),10); r.first++; tr.first++; r.missed=false; session.correct++; }
-    else { S.run=0; }
+    if(session.tries===1){ S.run++; bonus=Math.min(2*(S.run-1),10); r.first++; tr.first++; clearReview(r); session.correct++; }
+    else { S.run=0; markForReview(r,'incorrect'); }
     r.seen++; tr.seen++; r.ever=true;
     reveal(true);
     $('fb').innerHTML=`<div class="fb good"><b>${session.tries===1?'Yes! 😺':'Got it on the second pounce. 😼'}</b> +${gain} XP${bonus?` · streak bonus +${bonus} (🔁 ${S.run} in a row)`:''}<br>${esc(q.explain)}${src(q)}</div>${nextBtn()}`;
@@ -379,14 +528,25 @@ function answer(i){
   } else {
     btn.disabled=true; btn.classList.add('dim'); S.run=0;
     if(session.tries===1){
-      r.missed=true; save();
+      markForReview(r,'incorrect'); save();
       $('fb').innerHTML=`<div class="fb"><b>Close.</b> One more pick for +5, or see the catch.</div><div class="row" style="margin-top:8px"><button class="btn small" id="peek">Show me the catch</button></div>`;
       $('peek').onclick=()=>{ session.tries=2; giveUp(); };
     } else giveUp();
   }
 }
+function dunno(){
+  if(!session || session.done || !session.q || session.tries>0) return;
+  const q=session.q, r=rec(q), tr=tagRec(q.tag);
+  session.done=true; S.run=0; r.seen++; tr.seen++;
+  markForReview(r,'unknown');
+  const dun=$('dunno'); if(dun) dun.disabled=true;
+  reveal();
+  $('fb').innerHTML=`<div class="fb"><b>I don't know.</b> 0 XP for this question. It's in the Review Pile until you get it right on the first try.<br>${esc(q.explain)}${src(q)}</div>${nextBtn()}`;
+  persistSession(); bindNext();
+}
 function giveUp(){
-  const q=session.q, r=rec(q), tr=tagRec(q.tag); session.done=true; r.seen++; tr.seen++; r.missed=true; persistSession();
+  const q=session.q, r=rec(q), tr=tagRec(q.tag); session.done=true; r.seen++; tr.seen++; markForReview(r,'incorrect'); persistSession();
+  const dun=$('dunno'); if(dun) dun.disabled=true;
   reveal(false);
   $('fb').innerHTML=`<div class="fb"><b>Close. Here's the catch:</b> ${esc(q.explain)}${src(q)}</div><div class="row" style="margin-top:8px"><button class="btn small primary" id="readIt">I read it · +2 XP</button></div>`;
   $('readIt').onclick=()=>{ if(!session.read){ session.read=true; session.xp+=2; addXp(2,'thanks for reading the catch'); persistSession(); } $('readIt').outerHTML=nextBtn(); bindNext(); const n=$('next'); if(n) n.focus(); };
@@ -405,8 +565,8 @@ function finish(){
   $('view').innerHTML=`<div class="card"><h2>${esc(session.title)} complete 🐾</h2>
     <p>${session.correct} of ${session.list.length} on the first try · +${session.xp} XP this round.</p>${extra}
     <p class="meta">${reviewPile().length?'Anything you missed is in the Review Pile for later.':'Review Pile is clear.'}</p>
-    <div class="row"><button class="btn primary" data-go="home" id="homeBtn">Home</button><button class="btn" data-go="stats">Stats</button></div></div>`;
-  bindGo(); $('homeBtn').focus();
+    <div class="row">${reviewPile().length?'<button class="btn" id="copyReview" type="button">Copy misses</button>':''}<button class="btn primary" data-go="home" id="homeBtn">Home</button><button class="btn" data-go="stats">Stats</button></div></div>`;
+  bindGo(); if($('copyReview')) $('copyReview').onclick=()=>copyReviewMarkdown(); $('homeBtn').focus();
 }
 function completePounce(){
   const t=today();
@@ -488,13 +648,15 @@ function scoreBoss(b){
   $('bfb').innerHTML=`<div class="fb good">${esc(msg)}</div>`;
 }
 document.addEventListener('keydown',e=>{
-  if(e.target && (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA')) return;
   if(e.key==='Escape'){ home(); return; }
+  if(e.target && (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA')) return;
   if(!session || !session.q || !$('qtext')) return;
   const k=e.key.toLowerCase(); const m={'1':0,'2':1,'3':2,'4':3,a:0,b:1,c:2,d:3};
-  if(k in m && !session.done && !e.metaKey && !e.ctrlKey){ e.preventDefault(); answer(m[k]); }
+  if(k in m && !session.done && !e.metaKey && !e.ctrlKey && !e.altKey){ e.preventDefault(); answer(m[k]); }
+  else if((e.key==='0' || e.key==='?') && !session.done && !e.metaKey && !e.ctrlKey && !e.altKey){ e.preventDefault(); dunno(); }
   else if(e.key==='Enter' && session.done && $('next')){ e.preventDefault(); next(); }
 });
+window.catQuestTest={KEY,state:()=>S,currentSession:()=>session,reviewPile,exportReviewMarkdown,reviewReasonLabel,normalize,fresh,today,dayDiff};
 load(); bindSaveBar(); hud(); home();
 // a newer copy may sit in IndexedDB (for example after localStorage was cleared); adopt it if nothing has started yet
 idbGet().then(b=>{ if(b && (b.savedAt||0)>(S.savedAt||0) && !session){ S=normalize(b); save(); hud(); home(); toast('Progress restored from this browser\'s backup copy.'); } });
